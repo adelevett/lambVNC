@@ -71,8 +71,8 @@ function _validateConfig(input) {
     }
   };
 
-  // Port validation: 0 = OS-assigned (test/ephemeral), 1024-65535 = valid explicit
-  const checkPort = (val, name) => {
+  // serverPort/sshPort: 0 = OS-assigned (legitimate for test subprocesses), 1024-65535 = valid
+  const checkListenPort = (val, name) => {
     if (typeof val !== 'number' || !Number.isInteger(val)) {
       throw new Error(`config.${name} must be an integer, got: ${val}`);
     }
@@ -81,9 +81,10 @@ function _validateConfig(input) {
     }
   };
 
-  checkPort(config.serverPort, 'serverPort');
-  checkPort(config.sshPort, 'sshPort');
-  checkPort(config.basePort, 'basePort');
+  checkListenPort(config.serverPort, 'serverPort');
+  checkListenPort(config.sshPort, 'sshPort');
+  // basePort defines a pre-allocated range, not a listen socket — 0 is not valid (§15)
+  checkInt(config.basePort, 'basePort', 1024, 65535);
   checkInt(config.sessionTtl, 'sessionTtl', 1, 604800);
   checkInt(config.fadeDuration, 'fadeDuration', 1, 300);
   checkInt(config.reconnectInterval, 'reconnectInterval', 1, 60);

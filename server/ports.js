@@ -8,7 +8,7 @@ const profiles = require('./profiles');
  */
 function allocateNextPort(basePort) {
   const hosts = profiles.getHosts();
-  const usedPorts = Object.values(hosts).map(h => h.tunnelPort).filter(p => !!p);
+  const usedPorts = Object.values(hosts).map(h => h.tunnelPort).filter(Boolean);
 
   let port = basePort;
   while (usedPorts.includes(port)) {
@@ -42,14 +42,13 @@ function checkPortInUse(port) {
 }
 
 /**
- * Full synchronous-looking validation for index.js startup
+ * Validate all pre-allocated ports at startup.
+ * basePort is guaranteed valid (1024–65535) by validateConfig.
  * @param {number} basePort 
  */
 async function validateAllPorts(basePort) {
-  if (basePort === 0) return; // OS-assigned — nothing to validate
-
   const hosts = profiles.getHosts();
-  const allocatedPorts = Object.values(hosts).map(h => h.tunnelPort).filter(p => !!p);
+  const allocatedPorts = Object.values(hosts).map(h => h.tunnelPort).filter(Boolean);
 
   // Always validate the basePort itself (the next port that would be allocated)
   const portsToCheck = new Set([basePort, ...allocatedPorts]);

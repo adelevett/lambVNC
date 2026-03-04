@@ -116,7 +116,7 @@ function startServer(configOverrides = {}) {
     const config = {
       serverPort: 0,        // OS-assigned port
       sshPort: 0,
-      basePort: 0,
+      basePort: 59100,
       tls: false,
       sessionTtl: 60,
       fadeDuration: 15,

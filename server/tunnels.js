@@ -139,8 +139,8 @@ function startSshServer(config) {
     });
   });
 
-  server.listen(config.sshPort || 2222, '0.0.0.0', () => {
-    console.log(`SSH server listening on port ${config.sshPort || 2222}`);
+  server.listen(config.sshPort ?? 2222, '0.0.0.0', () => {
+    console.log(`SSH server listening on port ${server.address().port}`);
   });
 }
 

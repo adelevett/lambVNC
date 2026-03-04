@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login — LambVNC</title>
+    <style>
+        body {
+            background: #121212;
+            color: #e0e0e0;
+            font-family: sans-serif;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+        }
+        form {
+            background: #1e1e1e;
+            padding: 2rem;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            width: 300px;
+        }
+        h2 { margin-top: 0; }
+        input {
+            width: 100%;
+            padding: 10px;
+            margin: 10px 0;
+            background: #333;
+            border: 1px solid #444;
+            color: #fff;
+            box-sizing: border-box;
+        }
+        button {
+            width: 100%;
+            padding: 10px;
+            background: #2196f3;
+            border: none;
+            color: #fff;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+        button:hover { background: #1976d2; }
+        #error { color: #f44336; font-size: 0.8rem; margin-top: 10px; }
+    </style>
+</head>
+<body>
+    <form id="login-form">
+        <h2>LambVNC</h2>
+        <input type="password" id="password" placeholder="Administrator Password" required autofocus>
+        <button type="submit">Login</button>
+        <div id="error"></div>
+    </form>
+
+    <script>
+        const form = document.getElementById('login-form');
+        const error = document.getElementById('error');
+        
+        form.onsubmit = async (e) => {
+            e.preventDefault();
+            error.textContent = '';
+            
+            const password = document.getElementById('password').value;
+            const res = await fetch('/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ password })
+            });
+            
+            if (res.ok) {
+                window.location.href = '/';
+            } else {
+                const data = await res.json();
+                error.textContent = data.error || 'Login failed';
+            }
+        };
+    </script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+{
+  "serverPort": 3000,
+  "sshPort": 2222,
+  "basePort": 5910,
+  "tls": false,
+  "sessionTtl": 28800,
+  "fadeDuration": 15,
+  "reconnectInterval": 5,
+  "reconnectRetries": 3,
+  "maxHosts": 12,
+  "rateLimitWindow": 900,
+  "rateLimitMax": 10,
+  "auditRetentionDays": 90
+}

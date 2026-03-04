@@ -1,0 +1,33 @@
+{
+  "name": "lambvnc",
+  "version": "1.0.0",
+  "description": "One shepherd. Many lambs. Browser-based VNC monitoring dashboard.",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "postinstall": "node scripts/vendor.js"
+  },
+  "keywords": [
+    "vnc",
+    "monitoring",
+    "dashboard",
+    "novnc",
+    "ssh",
+    "tunnel"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "better-sqlite3": "^11.8.1",
+    "express": "^4.21.2",
+    "express-rate-limit": "^7.5.0",
+    "jsonwebtoken": "^9.0.2",
+    "read": "^4.0.0",
+    "ssh2": "^1.16.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@novnc/novnc": "^1.6.0"
+  }
+}

@@ -1,0 +1,199 @@
+:root {
+    --bg-color: #121212;
+    --header-bg: #1e1e1e;
+    --sidebar-bg: #1a1a1a;
+    --text-color: #e0e0e0;
+    --border-color: #333;
+    --alert-low: #2196f3;
+    --alert-medium: #ff9800;
+    --alert-high: #f44336;
+}
+
+body {
+    margin: 0;
+    padding: 0;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background-color: var(--bg-color);
+    color: var(--text-color);
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+}
+
+header {
+    background-color: var(--header-bg);
+    padding: 10px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid var(--border-color);
+    z-index: 100;
+}
+
+#app-container {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+}
+
+#sidebar {
+    width: 300px;
+    background-color: var(--sidebar-bg);
+    border-right: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+    padding: 20px;
+    overflow-y: auto;
+}
+
+.sidebar-section {
+    margin-bottom: 30px;
+}
+
+.sidebar-section h3 {
+    margin-top: 0;
+    font-size: 1rem;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+#grid {
+    flex: 1;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 10px;
+    padding: 10px;
+    overflow-y: auto;
+}
+
+.cell {
+    position: relative;
+    background: #000;
+    border: 1px solid var(--border-color);
+    aspect-ratio: 16/9;
+    overflow: hidden;
+    transition: opacity 0.2s;
+}
+
+.cell canvas {
+    width: 100%;
+    height: 100%;
+}
+
+.cell-header {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 5px 10px;
+    background: rgba(0, 0, 0, 0.7);
+    font-size: 0.8rem;
+    display: flex;
+    justify-content: space-between;
+    z-index: 10;
+}
+
+.cell-status {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.6);
+    z-index: 20;
+}
+
+.cell.connected .cell-status {
+    display: none;
+}
+
+/* Spinner for reconnecting */
+.spinner {
+    width: 30px;
+    height: 30px;
+    border: 3px solid rgba(255,255,255,0.3);
+    border-top: 3px solid #fff;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin-bottom: 10px;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.cell.reconnecting { opacity: 0.7; }
+.cell.disconnected { opacity: 0.5; filter: grayscale(1); }
+
+/* Alert Border Overlay */
+.cell::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border: 4px solid transparent;
+    pointer-events: none;
+    z-index: 5;
+    transition: border-color 0.2s, opacity 0.2s;
+    opacity: 0;
+}
+
+.cell.alert-low::after { border-color: var(--alert-low); opacity: 1; }
+.cell.alert-medium::after { border-color: var(--alert-medium); opacity: 1; }
+.cell.alert-high::after { border-color: var(--alert-high); opacity: 1; }
+
+.cell.fading::after {
+    transition: opacity var(--fade-duration, 15s) linear;
+    opacity: 0;
+}
+
+/* Modals */
+#modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.8);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 200;
+}
+
+.modal {
+    background: #1e1e1e;
+    padding: 25px;
+    border-radius: 8px;
+    width: 400px;
+    max-width: 90vw;
+}
+
+.hidden { display: none !important; }
+
+form label { display: block; margin: 15px 0; }
+form input[type="text"], form input[type="password"], form input[type="number"], form textarea, form select {
+    width: 100%;
+    padding: 8px;
+    background: #333;
+    border: 1px solid #444;
+    color: #fff;
+    box-sizing: border-box;
+}
+
+.modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+
+/* Host list in sidebar */
+.sidebar-host-item {
+    padding: 10px;
+    border-bottom: 1px solid #222;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.sidebar-actions { display: flex; gap: 5px; margin-top: 10px; }
+button { cursor: pointer; padding: 6px 12px; border: none; border-radius: 4px; background: #333; color: #fff; }
+button:hover { background: #444; }
+button.primary { background: #2196f3; }
+button.danger { background: #f44336; }

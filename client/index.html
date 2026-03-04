@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LambVNC — One shepherd. Many lambs.</title>
+    <link rel="stylesheet" href="/client/style.css">
+</head>
+<body>
+    <header>
+        <div class="logo">LambVNC</div>
+        <div class="controls">
+            <button id="mute-all">Mute All</button>
+            <button id="logout">Logout</button>
+        </div>
+    </header>
+
+    <div id="app-container">
+        <aside id="sidebar">
+            <div class="sidebar-section">
+                <h3>Profiles</h3>
+                <select id="profile-selector">
+                    <option value="">Select Profile...</option>
+                </select>
+                <div class="sidebar-actions">
+                    <button id="new-profile">New</button>
+                    <button id="save-profile">Save</button>
+                    <button id="delete-profile">Delete</button>
+                </div>
+            </div>
+            <div class="sidebar-section">
+                <h3>Hosts</h3>
+                <div id="host-list">
+                    <!-- Host management UI -->
+                </div>
+                <button id="add-host">Add Host</button>
+            </div>
+        </aside>
+
+        <main id="grid">
+            <!-- Cells will be dynamically injected here -->
+        </main>
+    </div>
+
+    <!-- Modals -->
+    <div id="modal-overlay" class="hidden">
+        <div id="host-modal" class="modal hidden">
+            <h2 id="modal-title">Add Host</h2>
+            <form id="host-form">
+                <input type="hidden" id="host-id">
+                <label>Label: <input type="text" id="host-label" required></label>
+                <label>IP: <input type="text" id="host-ip" required></label>
+                <label>VNC Port: <input type="number" id="host-vnc-port" value="5900"></label>
+                <label>VNC Password: <input type="password" id="host-vnc-password"></label>
+                <label>SSH Public Key: <textarea id="host-ssh-key" rows="3"></textarea></label>
+                <label>Alert Tier: 
+                    <select id="host-alert-tier">
+                        <option value="low">Low</option>
+                        <option value="medium" selected>Medium</option>
+                        <option value="high">High</option>
+                        <option value="none">None</option>
+                    </select>
+                </label>
+                <label>Fade Enabled: <input type="checkbox" id="host-fade-enabled" checked></label>
+                <div class="modal-actions">
+                    <button type="submit">Save</button>
+                    <button type="button" id="close-modal">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script type="module" src="/client/grid.js"></script>
+    <script type="module" src="/client/detection.js"></script>
+    <script type="module" src="/client/alerts.js"></script>
+    <script type="module" src="/client/profiles-ui.js"></script>
+</body>
+</html>

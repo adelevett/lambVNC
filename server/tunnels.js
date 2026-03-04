@@ -1,8 +1,14 @@
-const { Server } = require('ssh2');
+const { Server, utils } = require('ssh2');
 const fs = require('fs');
 const path = require('path');
 const WebSocket = require('ws');
-const profiles = require('./profiles');
+
+// Lazy require to break circular dependency: profiles ↔ tunnels
+let _profiles;
+function profiles() {
+  if (!_profiles) _profiles = require('./profiles');
+  return _profiles;
+}
 
 let DATA_DIR = path.join(__dirname, '..', 'data');
 
@@ -73,10 +79,16 @@ function startSshServer(config) {
         return ctx.reject(['publickey']);
       }
 
-      const hosts = profiles.getRawHosts();
+      const hosts = profiles().getRawHosts();
       for (const id in hosts) {
         const host = hosts[id];
-        if (host.sshPublicKey && host.sshPublicKey.includes(ctx.key.data.toString('base64'))) {
+        if (!host.sshPublicKey) continue;
+        // Parse the stored OpenSSH format key into its binary representation
+        const parsed = utils.parseKey(host.sshPublicKey);
+        if (parsed instanceof Error) continue;
+        // ctx.key.data is the raw public key blob from the SSH packet;
+        // parsed.getPublicSSH() returns the same binary format
+        if (ctx.key.data.equals(parsed.getPublicSSH())) {
           hostId = id;
           return ctx.accept();
         }
@@ -99,7 +111,7 @@ function startSshServer(config) {
 
       client.on('request', (accept, reject, name, info) => {
         if (name === 'tcpip-forward') {
-          const hosts = profiles.getRawHosts();
+          const hosts = profiles().getRawHosts();
           const host = hosts[hostId];
           if (info.bindAddr === '127.0.0.1' && info.bindPort === host.tunnelPort) {
             accept();

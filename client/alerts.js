@@ -13,6 +13,10 @@ let globalFadeDuration = 15000;
  */
 async function fetchConfigs() {
     const res = await fetch('/api/hosts');
+    if (!res.ok) {
+        console.warn('alerts: failed to fetch host configs, status', res.status);
+        return;
+    }
     const data = await res.json();
 
     if (data.fadeDuration) globalFadeDuration = data.fadeDuration;

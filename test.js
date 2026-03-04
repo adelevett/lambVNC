@@ -142,16 +142,31 @@ function startServer(configOverrides = {}) {
 
     let stdout = '';
     let port = null;
+    let sshPort = null;
+    let resolved = false;
 
     proc.stdout.on('data', (chunk) => {
       stdout += chunk.toString();
-      // Server must print "LambVNC listening on port XXXX"
+
+      // Capture SSH port: "SSH server listening on port XXXX"
+      const sshMatch = stdout.match(/SSH server listening on port (\d+)/);
+      if (sshMatch && !sshPort) {
+        sshPort = parseInt(sshMatch[1], 10);
+      }
+
+      // Capture HTTP port: "LambVNC listening on port XXXX"
       const match = stdout.match(/LambVNC listening on port (\d+)/);
       if (match && !port) {
         port = parseInt(match[1], 10);
+      }
+
+      // Resolve only when both ports are known
+      if (port && sshPort && !resolved) {
+        resolved = true;
         resolve({
           process: proc,
           port,
+          sshPort,
           dataDir: tmpDir,
           kill: () => new Promise(res => { proc.kill(); proc.on('exit', res); })
         });
@@ -160,11 +175,11 @@ function startServer(configOverrides = {}) {
 
     proc.on('error', reject);
     proc.on('exit', (code) => {
-      if (!port) reject(new Error(`Server exited early (code ${code})\n${stdout}`));
+      if (!resolved) reject(new Error(`Server exited early (code ${code})\n${stdout}`));
     });
 
     setTimeout(() => {
-      if (!port) {
+      if (!resolved) {
         proc.kill();
         reject(new Error(`Server did not signal ready within 5s\n${stdout}`));
       }
@@ -817,11 +832,126 @@ describe('Integration: Port collision — fail loud at startup (§3.5, §15)', (
 });
 
 // ---------------------------------------------------------------------------
-// 4. EVENT BUS CONTRACT TESTS
-//    Verify CustomEvent payload shape using Node's built-in DOM simulation.
-//    Requires Node 20's experimental --experimental-vm-modules or a minimal
-//    DOM shim. We use a lightweight approach: test the dispatch/listen
-//    mechanics via a bare EventTarget (available in Node 18+).
+// 5. SSH SENDER AUTHENTICATION TESTS
+//    Uses ssh2 Client (already a project dependency) to test the actual
+//    SSH public key authentication path end-to-end.
+// ---------------------------------------------------------------------------
+
+describe('Security: SSH sender authentication (§3.7)', () => {
+
+  const { Client, utils: sshUtils } = require('ssh2');
+
+  let server;
+  let cookie;
+  let registeredHostId;
+  let testKeyPair;
+
+  before(async () => {
+    testKeyPair = sshUtils.generateKeyPairSync('ed25519');
+    server = await startServer();
+    cookie = await login(server.port);
+
+    // Register a host with the generated public key
+    const res = await request({
+      hostname: '127.0.0.1',
+      port: server.port,
+      path: '/api/hosts',
+      method: 'POST',
+      headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+    }, JSON.stringify({
+      label: 'SSH Test Sender',
+      ip: '127.0.0.1',
+      vncPort: 5900,
+      password: 'irrelevant',
+      sshPublicKey: testKeyPair.public,
+      alertTier: 'medium',
+      fadeEnabled: true,
+    }));
+    registeredHostId = JSON.parse(res.body).hostId;
+  });
+
+  after(async () => { await server.kill(); });
+
+  test('sender with registered key is authenticated and port forward accepted', async () => {
+    // Fetch the tunnel port assigned to this host
+    const hostsRes = await request({
+      hostname: '127.0.0.1', port: server.port,
+      path: '/api/hosts', headers: { Cookie: cookie }
+    });
+    const { hosts } = JSON.parse(hostsRes.body);
+    const tunnelPort = hosts[registeredHostId].tunnelPort;
+
+    await new Promise((resolve, reject) => {
+      const client = new Client();
+      client.on('ready', () => {
+        client.forwardIn('127.0.0.1', tunnelPort, (err) => {
+          client.end();
+          if (err) reject(new Error(`Port forward rejected: ${err.message}`));
+          else resolve();
+        });
+      });
+      client.on('error', (err) => {
+        reject(new Error(`SSH auth failed — key comparison broken: ${err.message}`));
+      });
+      client.connect({
+        host: '127.0.0.1',
+        port: server.sshPort,
+        username: 'sender',
+        privateKey: testKeyPair.private,
+      });
+    });
+  });
+
+  test('sender with unregistered key is rejected', async () => {
+    const foreignKey = sshUtils.generateKeyPairSync('ed25519');
+    await new Promise((resolve, reject) => {
+      const client = new Client();
+      client.on('ready', () => {
+        client.end();
+        reject(new Error('Unregistered key should have been rejected'));
+      });
+      client.on('error', () => {
+        // Expected — unregistered key must be refused
+        resolve();
+      });
+      client.connect({
+        host: '127.0.0.1',
+        port: server.sshPort,
+        username: 'sender',
+        privateKey: foreignKey.private,
+      });
+    });
+  });
+
+  test('port forward to wrong port is rejected', async () => {
+    await new Promise((resolve, reject) => {
+      const client = new Client();
+      client.on('ready', () => {
+        // Try to forward on a port that doesn't match the host's tunnelPort
+        client.forwardIn('127.0.0.1', 9999, (err) => {
+          client.end();
+          if (err) resolve(); // Expected: rejected
+          else reject(new Error('Port forward to wrong port should have been rejected'));
+        });
+      });
+      client.on('error', (err) => {
+        reject(new Error(`SSH connection failed: ${err.message}`));
+      });
+      client.connect({
+        host: '127.0.0.1',
+        port: server.sshPort,
+        username: 'sender',
+        privateKey: testKeyPair.private,
+      });
+    });
+  });
+
+});
+
+// ---------------------------------------------------------------------------
+// 6. EVENT BUS CONTRACT TESTS
+//    Verify CustomEvent payload shape using Node 22's built-in EventTarget
+//    and CustomEvent globals. No DOM shim or experimental flags needed.
 // ---------------------------------------------------------------------------
 
 describe('Event Bus: CustomEvent detail payload shape (§7.1)', () => {

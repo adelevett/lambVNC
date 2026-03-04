@@ -225,6 +225,7 @@ function setupRoutes(config) {
     res.json({ success: true });
   });
   app.delete('/api/hosts/:hostId', (req, res) => {
+    proxy.evictBridge(req.params.hostId);
     profiles.removeHost(req.params.hostId);
     res.json({ success: true });
   });

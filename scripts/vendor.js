@@ -1,39 +1,65 @@
 // scripts/vendor.js — runs via "postinstall" in package.json
-// Copies noVNC core/ and vendor/ into client/vendor/novnc/
+// Downloads noVNC ESM source from GitHub into client/vendor/novnc/
+// The npm package (@novnc/novnc) only ships Babel-compiled CJS (lib/) which
+// does not work in the browser. The real ES module source is in core/ on GitHub.
+const https = require('https');
+const zlib = require('zlib');
+const tar = require('tar');
+const { pipeline } = require('stream/promises');
 const fs = require('fs');
 const path = require('path');
 
-const src = path.join(__dirname, '..', 'node_modules', '@novnc', 'novnc');
-const dst = path.join(__dirname, '..', 'client', 'vendor', 'novnc');
+const NOVNC_VERSION = '1.5.0';
+const NOVNC_URL = `https://github.com/novnc/noVNC/archive/refs/tags/v${NOVNC_VERSION}.tar.gz`;
+const ARCHIVE_PREFIX = `noVNC-${NOVNC_VERSION}/`;
+const DST = path.join(__dirname, '..', 'client', 'vendor', 'novnc');
 
-// ARCHITECTURE.md §20: copy core/ and vendor/ from the npm package
-const coreSrc = path.join(src, 'core');
-const vendorSrc = path.join(src, 'vendor');
-const coreDst = path.join(dst, 'core');
-const vendorDst = path.join(dst, 'vendor');
-
-// Ensure destination exists
-if (!fs.existsSync(dst)) {
-  fs.mkdirSync(dst, { recursive: true });
+function fetchWithRedirects(url, maxRedirects = 5) {
+  return new Promise((resolve, reject) => {
+    const get = (u, remaining) => {
+      https.get(u, { headers: { 'User-Agent': 'lambvnc-postinstall' } }, (res) => {
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          if (remaining <= 0) return reject(new Error('Too many redirects'));
+          get(res.headers.location, remaining - 1);
+        } else if (res.statusCode !== 200) {
+          reject(new Error(`HTTP ${res.statusCode} fetching ${u}`));
+        } else {
+          resolve(res);
+        }
+      }).on('error', reject);
+    };
+    get(url, maxRedirects);
+  });
 }
 
-// Copy core/
-if (fs.existsSync(coreSrc)) {
-  fs.cpSync(coreSrc, coreDst, { recursive: true });
-} else {
-  // Fallback: some noVNC versions use lib/ instead of core/
-  const libSrc = path.join(src, 'lib');
-  if (fs.existsSync(libSrc)) {
-    fs.cpSync(libSrc, coreDst, { recursive: true });
-  } else {
-    console.error('ERROR: Could not find noVNC core/ or lib/ directory in', src);
-    process.exit(1);
+async function main() {
+  if (fs.existsSync(DST)) {
+    fs.rmSync(DST, { recursive: true });
   }
+  fs.mkdirSync(DST, { recursive: true });
+
+  console.log(`Downloading noVNC v${NOVNC_VERSION} from GitHub...`);
+  const response = await fetchWithRedirects(NOVNC_URL);
+
+  // Extract core/ (ESM source) and vendor/ (pako etc.) from the tarball.
+  // strip:1 removes the top-level "noVNC-1.5.0/" component so they land at DST/core/ and DST/vendor/
+  await pipeline(
+    response,
+    zlib.createGunzip(),
+    tar.extract({
+      cwd: DST,
+      strip: 1,
+      filter: (entryPath) =>
+        entryPath.startsWith(ARCHIVE_PREFIX + 'core/') ||
+        entryPath.startsWith(ARCHIVE_PREFIX + 'vendor/'),
+    })
+  );
+
+  console.log('noVNC vendored to client/vendor/novnc/');
 }
 
-// Copy vendor/ if it exists
-if (fs.existsSync(vendorSrc)) {
-  fs.cpSync(vendorSrc, vendorDst, { recursive: true });
-}
+main().catch((err) => {
+  console.error('ERROR: failed to vendor noVNC:', err.message);
+  process.exit(1);
+});
 
-console.log('noVNC vendored to client/vendor/novnc/');

@@ -2,6 +2,7 @@ import RFB from '/client/vendor/novnc/core/rfb.js';
 
 const grid = document.getElementById('grid');
 const rfbs = new Map(); // hostId -> RFB instance
+const hostStates = new Map(); // hostId -> tunnel status
 const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 
 // Connect to the control channel
@@ -9,8 +10,20 @@ const controlWs = new WebSocket(`${protocol}//${window.location.host}/control`);
 controlWs.onmessage = (event) => {
     const { type, detail } = JSON.parse(event.data);
     if (type === 'tunnel:status-changed') {
+        hostStates.set(detail.cellId, detail.status);
         window.dispatchEvent(new CustomEvent('tunnel:status-changed', { detail }));
         updateCellStatus(detail.cellId, detail.status);
+
+        // Reconnect lazily when tunnel becomes available.
+        if (detail.status === 'connected' && !rfbs.has(detail.cellId)) {
+            connectHost(detail.cellId);
+        }
+
+        // Drop stale sessions when tunnel is down.
+        if ((detail.status === 'reconnecting' || detail.status === 'disconnected') && rfbs.has(detail.cellId)) {
+            rfbs.get(detail.cellId).disconnect();
+            rfbs.delete(detail.cellId);
+        }
     }
 };
 
@@ -49,7 +62,9 @@ function updateCellStatus(hostId, status) {
  * Connects to VNC
  */
 function connectHost(hostId) {
+    if (rfbs.has(hostId)) return;
     const cell = document.getElementById(`cell-${hostId}`);
+    if (!cell) return;
     const rfb = new RFB(cell, `${protocol}//${window.location.host}/ws/${hostId}`, {
         wsProtocols: ['binary']
     });
@@ -67,6 +82,7 @@ function connectHost(hostId) {
     });
 
     rfb.addEventListener('disconnect', () => {
+        rfbs.delete(hostId);
         window.dispatchEvent(new CustomEvent('cell:disconnected', { detail: { cellId: hostId } }));
     });
 
@@ -76,6 +92,37 @@ function connectHost(hostId) {
 
     rfbs.set(hostId, rfb);
 }
+
+/**
+ * Sets grid column count based on total cell count.
+ */
+function updateGridLayout(hostCount) {
+    const cols = hostCount <= 1 ? 1
+               : hostCount <= 4 ? 2
+               : hostCount <= 9 ? 3
+               : 4;
+    grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+}
+
+// Click-to-focus: expand a cell to fill the grid row
+grid.addEventListener('click', (e) => {
+    const cell = e.target.closest('.cell');
+    if (!cell) return;
+
+    const isExpanded = cell.classList.contains('expanded');
+
+    // Collapse any currently expanded cell
+    document.querySelectorAll('.cell.expanded')
+        .forEach(c => c.classList.remove('expanded'));
+
+    if (!isExpanded) {
+        cell.classList.add('expanded');
+        // Ensure the VNC canvas scales to fill the enlarged container
+        const hostId = cell.id.replace('cell-', '');
+        const rfb = rfbs.get(hostId);
+        if (rfb) rfb.scaleViewport = true;
+    }
+});
 
 // Viewport Virtualization
 const observer = new IntersectionObserver((entries) => {
@@ -95,6 +142,9 @@ const observer = new IntersectionObserver((entries) => {
                 canvas.height = canvas._originalHeight;
             }
         } else {
+            // Skip canvas-zeroing for expanded cells — they are intentionally
+            // large and should not be treated as off-screen during layout transitions.
+            if (entry.target.classList.contains('expanded')) return;
             rfb.scaleViewport = false;
             // Release context by minimizing canvas footprint
             if (canvas && canvas.width > 0) {
@@ -114,7 +164,10 @@ async function initGrid() {
     for (const id in data.hosts) {
         createCell(id, data.hosts[id].label);
         updateCellStatus(id, data.hosts[id].tunnelState);
-        connectHost(id);
+        hostStates.set(id, data.hosts[id].tunnelState);
+        if (data.hosts[id].tunnelState === 'connected') {
+            connectHost(id);
+        }
         // SPEC §7.1: Initialize detection tier from saved host profile
         if (data.hosts[id].alertTier) {
             window.dispatchEvent(new CustomEvent('alert:set-tier', {
@@ -122,6 +175,7 @@ async function initGrid() {
             }));
         }
     }
+    updateGridLayout(Object.keys(data.hosts).length);
 }
 
 window.addEventListener('profile:loaded', (event) => {
@@ -135,7 +189,10 @@ window.addEventListener('profile:loaded', (event) => {
             if (data.hosts[id]) {
                 createCell(id, data.hosts[id].label);
                 updateCellStatus(id, data.hosts[id].tunnelState);
-                connectHost(id);
+                hostStates.set(id, data.hosts[id].tunnelState);
+                if (data.hosts[id].tunnelState === 'connected') {
+                    connectHost(id);
+                }
                 // SPEC §7.1: Initialize detection tier from saved host profile
                 if (data.hosts[id].alertTier) {
                     window.dispatchEvent(new CustomEvent('alert:set-tier', {
@@ -144,6 +201,7 @@ window.addEventListener('profile:loaded', (event) => {
                 }
             }
         });
+        updateGridLayout(profile.hostIds.filter(id => data.hosts[id]).length);
     });
 });
 

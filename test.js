@@ -946,6 +946,291 @@ describe('Security: SSH sender authentication (§3.7)', () => {
     });
   });
 
+  test('tunnel port is bound and data flows end-to-end after port forward (§3.6)', async () => {
+    // This test catches the bug where tcpip-forward is accept()ed but no TCP
+    // socket is actually bound on the server, causing ECONNREFUSED when the
+    // proxy attempts to connect to the tunnel port.
+
+    // 1. Fake "VNC server" on the sender side — echoes anything it receives.
+    const echoServer = net.createServer((sock) => { sock.pipe(sock); });
+    const echoPort = await new Promise(res =>
+      echoServer.listen(0, '127.0.0.1', () => res(echoServer.address().port))
+    );
+
+    // 2. Look up tunnel port assigned to the registered host.
+    const hostsRes = await request({
+      hostname: '127.0.0.1', port: server.port,
+      path: '/api/hosts', headers: { Cookie: cookie }
+    });
+    const { hosts } = JSON.parse(hostsRes.body);
+    const tunnelPort = hosts[registeredHostId].tunnelPort;
+
+    try {
+      await new Promise((resolve, reject) => {
+        const sshClient = new Client();
+
+        sshClient.on('ready', () => {
+          // 3. Ask the server to listen on the tunnel port (SSH -R).
+          sshClient.forwardIn('127.0.0.1', tunnelPort, (err) => {
+            if (err) return reject(new Error(`forwardIn rejected: ${err.message}`));
+            // forwardIn accepted — now verify the port is actually bound by
+            // attempting a real TCP connection from outside.
+            // Give the server a tick to finish binding.
+            setTimeout(() => {
+              const probe = net.createConnection(tunnelPort, '127.0.0.1');
+              probe.on('error', (err) => {
+                sshClient.end();
+                reject(new Error(`Tunnel port not bound after forwardIn: ${err.message}`));
+              });
+              probe.on('connect', () => {
+                probe.destroy();
+                sshClient.end();
+                resolve();
+              });
+              setTimeout(() => {
+                probe.destroy();
+                sshClient.end();
+                reject(new Error('Probe connection to tunnel port timed out'));
+              }, 2000);
+            }, 100);
+          });
+        });
+
+        // 4. When the server sends a forwarded connection over the SSH channel,
+        //    pipe it to the local echo server (simulating TightVNC).
+        sshClient.on('tcp connection', (_info, acceptChannel) => {
+          const channel = acceptChannel();
+          const vnc = net.createConnection(echoPort, '127.0.0.1');
+          channel.pipe(vnc);
+          vnc.pipe(channel);
+          vnc.on('error', () => channel.destroy());
+          channel.on('error', () => vnc.destroy());
+        });
+
+        sshClient.on('error', (err) =>
+          reject(new Error(`SSH connection error: ${err.message}`))
+        );
+
+        sshClient.connect({
+          host: '127.0.0.1',
+          port: server.sshPort,
+          username: 'sender',
+          privateKey: testKeyPair.private,
+        });
+      });
+    } finally {
+      await new Promise(res => echoServer.close(res));
+    }
+  });
+
+  test('data flows through tunnel to VNC server and back (§3.6)', async () => {
+    // End-to-end data path: test TCP client → tunnel port → SSH channel →
+    // echo server → SSH channel → test TCP client.
+
+    const echoServer = net.createServer((sock) => { sock.pipe(sock); });
+    const echoPort = await new Promise(res =>
+      echoServer.listen(0, '127.0.0.1', () => res(echoServer.address().port))
+    );
+
+    const hostsRes = await request({
+      hostname: '127.0.0.1', port: server.port,
+      path: '/api/hosts', headers: { Cookie: cookie }
+    });
+    const { hosts } = JSON.parse(hostsRes.body);
+    const tunnelPort = hosts[registeredHostId].tunnelPort;
+
+    try {
+      await new Promise((resolve, reject) => {
+        const sshClient = new Client();
+
+        sshClient.on('tcp connection', (_info, acceptChannel) => {
+          const channel = acceptChannel();
+          const vnc = net.createConnection(echoPort, '127.0.0.1');
+          channel.pipe(vnc);
+          vnc.pipe(channel);
+          vnc.on('error', () => channel.destroy());
+          channel.on('error', () => vnc.destroy());
+        });
+
+        sshClient.on('ready', () => {
+          sshClient.forwardIn('127.0.0.1', tunnelPort, (err) => {
+            if (err) return reject(new Error(`forwardIn rejected: ${err.message}`));
+
+            setTimeout(() => {
+              const sock = net.createConnection(tunnelPort, '127.0.0.1');
+              const chunks = [];
+
+              sock.on('connect', () => sock.write('hello-vnc'));
+              sock.on('data', (d) => {
+                chunks.push(d.toString());
+                if (chunks.join('').includes('hello-vnc')) {
+                  sock.destroy();
+                  sshClient.end();
+                  resolve();
+                }
+              });
+              sock.on('error', (err) => {
+                sshClient.end();
+                reject(new Error(`Data-path connection failed: ${err.message}`));
+              });
+              setTimeout(() => {
+                sock.destroy();
+                sshClient.end();
+                reject(new Error('No echo received within 3s'));
+              }, 3000);
+            }, 100);
+          });
+        });
+
+        sshClient.on('error', (err) =>
+          reject(new Error(`SSH error: ${err.message}`))
+        );
+
+        sshClient.connect({
+          host: '127.0.0.1',
+          port: server.sshPort,
+          username: 'sender',
+          privateKey: testKeyPair.private,
+        });
+      });
+    } finally {
+      await new Promise(res => echoServer.close(res));
+    }
+  });
+
+  test('complete RFB handshake flows through SSH tunnel → proxy → WebSocket (§3.6)', async () => {
+    // This is the definitive end-to-end test:
+    //
+    //   [test WS client] ──/ws/hostId──► [proxy.js bridge] ──TCP:tunnelPort──►
+    //   [tunnels.js tcpServer] ──SSH channel──► [vncStub] ──SSH channel──►
+    //   [tunnels.js tcpServer] → TCP → proxy → WS → test client
+    //
+    // A "VNC stub" speaks the first RFB version frame ("RFB 003.008\n").
+    // If the stub receives the connection at all => tunnel path is complete.
+    // If the WS client receives the RFB version bytes => proxy is transparent.
+    //
+    // This test would have caught:
+    //   (a) ECONNREFUSED — tunnel port not bound
+    //   (b) TightVNC "loopback not enabled" — stub listens on loopback fine,
+    //       so a failure here means LambVNC code is broken, not TightVNC config.
+
+    const RFB_VERSION = Buffer.from('RFB 003.008\n');
+
+    // 1. VNC stub: sends RFB version, then echoes everything.
+    const vncStub = net.createServer((sock) => {
+      sock.write(RFB_VERSION);
+      sock.pipe(sock);
+    });
+    const vncPort = await new Promise(res =>
+      vncStub.listen(0, '127.0.0.1', () => res(vncStub.address().port))
+    );
+
+    const hostsRes = await request({
+      hostname: '127.0.0.1', port: server.port,
+      path: '/api/hosts', headers: { Cookie: cookie }
+    });
+    const { hosts } = JSON.parse(hostsRes.body);
+    const tunnelPort = hosts[registeredHostId].tunnelPort;
+
+    try {
+      await new Promise((resolve, reject) => {
+        const sshClient = new Client();
+
+        // 2. Pipe each forwarded SSH channel to the local VNC stub.
+        sshClient.on('tcp connection', (_info, acceptChannel) => {
+          const channel = acceptChannel();
+          const vnc = net.createConnection(vncPort, '127.0.0.1');
+          channel.pipe(vnc);
+          vnc.pipe(channel);
+          vnc.on('error', () => channel.destroy());
+          channel.on('error', () => vnc.destroy());
+        });
+
+        sshClient.on('ready', () => {
+          sshClient.forwardIn('127.0.0.1', tunnelPort, async (err) => {
+            if (err) return reject(new Error(`forwardIn rejected: ${err.message}`));
+
+            // Give the TCP server a tick to bind.
+            await new Promise(r => setTimeout(r, 100));
+
+            // 3. Authenticate and open a WebSocket to /ws/<hostId> —
+            //    simulating exactly what the browser's noVNC does.
+            const loginRes = await request({
+              hostname: '127.0.0.1', port: server.port,
+              path: '/login', method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+            }, JSON.stringify({ password: 'test-password-correct-horse' }));
+            const wsCoookie = loginRes.headers['set-cookie']?.[0] || '';
+
+            const wsReq = http.request({
+              hostname: '127.0.0.1',
+              port: server.port,
+              path: `/ws/${registeredHostId}`,
+              headers: {
+                Cookie: wsCoookie,
+                Connection: 'Upgrade',
+                Upgrade: 'websocket',
+                'Sec-WebSocket-Key': crypto.randomBytes(16).toString('base64'),
+                'Sec-WebSocket-Version': '13',
+                'Sec-WebSocket-Protocol': 'binary',
+              },
+            });
+
+            wsReq.on('upgrade', (res, socket) => {
+              // 4. Accumulate WebSocket frames and look for the RFB version bytes.
+              const chunks = [];
+              socket.on('data', (chunk) => {
+                chunks.push(chunk);
+                const all = Buffer.concat(chunks);
+                // RFB version is in the WS payload — scan for it.
+                // (WS frames have a 2–10 byte header; we just look for the marker.)
+                if (all.toString('binary').includes('RFB 003.008')) {
+                  socket.destroy();
+                  sshClient.end();
+                  resolve();
+                }
+              });
+              socket.on('error', (err) => {
+                sshClient.end();
+                reject(new Error(`WS socket error: ${err.message}`));
+              });
+              setTimeout(() => {
+                socket.destroy();
+                sshClient.end();
+                reject(new Error('RFB version not received within 3s — tunnel or proxy broken'));
+              }, 3000);
+            });
+
+            wsReq.on('response', (res) => {
+              sshClient.end();
+              reject(new Error(`WS upgrade was not accepted (HTTP ${res.statusCode})`));
+            });
+
+            wsReq.on('error', (err) => {
+              sshClient.end();
+              reject(new Error(`WS request error: ${err.message}`));
+            });
+
+            wsReq.end();
+          });
+        });
+
+        sshClient.on('error', (err) =>
+          reject(new Error(`SSH error: ${err.message}`))
+        );
+
+        sshClient.connect({
+          host: '127.0.0.1',
+          port: server.sshPort,
+          username: 'sender',
+          privateKey: testKeyPair.private,
+        });
+      });
+    } finally {
+      await new Promise(res => vncStub.close(res));
+    }
+  });
+
 });
 
 // ---------------------------------------------------------------------------

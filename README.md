@@ -69,23 +69,61 @@ Navigate to `http://localhost:3000` and log in with the password you set.
 
 Each monitored Windows machine needs a one-time configuration:
 
-1. **Install TightVNC Server** — configure to listen on port 5900
-2. **Enable OpenSSH Client** — Settings → Apps → Optional Features → OpenSSH Client
-3. **Generate an SSH key pair** on the sender:
-   ```powershell
-   ssh-keygen -t ed25519 -f C:\Users\<user>\.ssh\lambvnc_key -N ""
-   ```
-4. **Register the sender** in the LambVNC dashboard — paste the public key (`lambvnc_key.pub`) when adding the host
-5. **Create a startup task** that runs on boot:
-   ```bash
-   ssh -i C:\Users\<user>\.ssh\lambvnc_key -N -R 127.0.0.1:<tunnelPort>:127.0.0.1:5900 sender@<lambvnc-server> -p 2222 -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o StrictHostKeyChecking=accept-new
-   ```
+### 1. Install TightVNC Server
+
+Install TightVNC Server and configure it to listen on port 5900.
+
+**Lock TightVNC to loopback only** — the SSH tunnel connects to TightVNC from `127.0.0.1` on the sender machine. Setting TightVNC to accept only loopback connections means it is completely unreachable from the LAN — all VNC access is forced through the LambVNC SSH tunnel.
+
+Open **TightVNC Server → Configuration → Access Control** and check **"Allow only loopback connections"**.
+
+> [!IMPORTANT]
+> If this box is unchecked, TightVNC is directly reachable over the LAN, bypassing the SSH tunnel and all authentication LambVNC provides. If the box is checked but the wrong option is selected, the tile will show "Security negotiation failed — loopback connections are not enabled".
+
+### 2. Enable OpenSSH Client
+
+Settings → Apps → Optional Features → OpenSSH Client.
+
+### 3. Generate an SSH key pair on the sender
+
+```powershell
+ssh-keygen -t ed25519 -f C:\Users\<USERNAME>\.ssh\lambvnc_key -N ""
+```
+
+### 4. Register the sender in the LambVNC dashboard
+
+In the dashboard sidebar, click **Add Host** and fill in:
+- Label, IP, VNC port, VNC password
+- Paste the contents of `C:\Users\<USERNAME>\.ssh\lambvnc_key.pub` into the SSH Public Key field
+
+### 5. Copy the generated SSH command
+
+After saving the host, click the **⊘ copy button** next to it in the sidebar. This copies a fully pre-filled SSH command to your clipboard with the correct tunnel port, VNC port, and SSH port already substituted.
+
+Replace `<USERNAME>` with the Windows username on the sender, and `<SERVER-IP>` with the LambVNC machine's IP address as reachable from the sender's network.
+
+### 6. Create a startup task that runs on boot
+
+Paste the copied command into a scheduled task (Trigger: At startup, run as SYSTEM or the sender user). For auto-recovery if the tunnel drops, wrap it in a loop:
+
+```powershell
+while ($true) {
+    ssh -i C:\Users\<USERNAME>\.ssh\lambvnc_key -N `
+        -R 127.0.0.1:<TUNNEL_PORT>:127.0.0.1:<VNC_PORT> `
+        sender@<SERVER-IP> -p <SSH_PORT> `
+        -o ExitOnForwardFailure=yes `
+        -o ServerAliveInterval=30 `
+        -o ServerAliveCountMax=3 `
+        -o StrictHostKeyChecking=accept-new
+    Start-Sleep -Seconds 2
+}
+```
 
 > [!WARNING]
 > Always use `127.0.0.1` explicitly in the `-R` flag — never `localhost`.
 > Windows OpenSSH may bind to IPv6 loopback (`[::1]`) when `localhost` is used, silently breaking the tunnel.
 
-The `<tunnelPort>` is assigned by LambVNC when you add the host (visible in the dashboard or via `GET /api/hosts`). The startup task can be deployed via Group Policy for zero-touch provisioning.
+The startup task can be deployed via Group Policy for zero-touch provisioning.
 
 ---
 

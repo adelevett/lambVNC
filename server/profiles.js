@@ -78,6 +78,7 @@ function getHosts(config) {
   if (config) {
     result.fadeDuration = (config.fadeDuration || 15) * 1000;
     result.maxHosts = config.maxHosts || 12;
+    result.sshPort = config.sshPort || 2222;
   }
   return result;
 }

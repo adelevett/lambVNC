@@ -28,6 +28,7 @@
     "ws": "^8.18.0"
   },
   "devDependencies": {
-    "@novnc/novnc": "^1.6.0"
+    "@novnc/novnc": "^1.6.0",
+    "tar": "^6.2.0"
   }
 }

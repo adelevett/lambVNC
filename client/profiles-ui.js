@@ -16,6 +16,8 @@ muteAllBtn.onclick = () => {
     muteAllBtn.textContent = muteAllBtn.textContent === 'Mute All' ? 'Unmute All' : 'Mute All';
 };
 
+let _sshPort = 2222;
+
 async function loadData() {
     const [hostsRes, profilesRes] = await Promise.all([
         fetch('/api/hosts'),
@@ -23,6 +25,7 @@ async function loadData() {
     ]);
     const hostsData = await hostsRes.json();
     const hosts = hostsData.hosts;
+    if (hostsData.sshPort) _sshPort = hostsData.sshPort;
     const profiles = await profilesRes.json();
 
     // Render Profiles
@@ -53,6 +56,7 @@ async function loadData() {
                     <option value="high" ${hosts[id].alertTier === 'high' ? 'selected' : ''}>High</option>
                     <option value="none" ${hosts[id].alertTier === 'none' ? 'selected' : ''}>None</option>
                 </select>
+                <button class="copy-ssh" data-id="${id}" data-port="${hosts[id].tunnelPort}" data-vnc-port="${hosts[id].vncPort || 5900}" title="Copy SSH tunnel command">⎘</button>
                 <button class="edit-host" data-id="${id}">✎</button>
                 <button class="delete-host danger" data-id="${id}">×</button>
             </div>
@@ -142,7 +146,15 @@ hostForm.onsubmit = async (e) => {
 
 hostList.onclick = async (e) => {
     const id = e.target.dataset.id;
-    if (e.target.classList.contains('delete-host')) {
+    if (e.target.classList.contains('copy-ssh')) {
+        const tunnelPort = e.target.dataset.port;
+        const vncPort = e.target.dataset.vncPort;
+        const cmd = `ssh -i C:\\Users\\<USERNAME>\\.ssh\\lambvnc_key -N -R 127.0.0.1:${tunnelPort}:127.0.0.1:${vncPort} sender@<SERVER-IP> -p ${_sshPort} -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o StrictHostKeyChecking=accept-new`;
+        await navigator.clipboard.writeText(cmd);
+        const btn = e.target;
+        btn.textContent = '✓';
+        setTimeout(() => { btn.textContent = '⎘'; }, 1500);
+    } else if (e.target.classList.contains('delete-host')) {
         if (confirm('Delete this host?')) {
             await fetch(`/api/hosts/${id}`, { method: 'DELETE' });
             loadData();

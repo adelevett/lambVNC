@@ -3,7 +3,7 @@ const http = require('http');
 const path = require('path');
 const fs = require('fs');
 const bcrypt = require('bcryptjs');
-const read = require('read');
+const { read } = require('read');
 
 // ---------------------------------------------------------------------------
 // CLI flag: --config <path> (for test subprocess isolation)
@@ -179,8 +179,8 @@ async function bootstrap(config) {
       console.log('✓ Test mode: password set from LAMBVNC_TEST_PASSWORD.');
     } else {
       console.log('\n\x1b[36m%s\x1b[0m', 'LambVNC first run — set administrator password:');
-      const password = await new Promise(r => read({ prompt: 'Password: ', silent: true }, (e, res) => r(res)));
-      const confirm = await new Promise(r => read({ prompt: 'Confirm:  ', silent: true }, (e, res) => r(res)));
+      const password = await read({ prompt: 'Password: ', silent: true });
+      const confirm = await read({ prompt: 'Confirm:  ', silent: true });
       if (password !== confirm) {
         console.error('\x1b[31m%s\x1b[0m', 'Passwords do not match.');
         process.exit(1);
